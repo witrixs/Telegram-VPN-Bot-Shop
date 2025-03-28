@@ -1,0 +1,6 @@
+aiogram==2.25.1          # Для Telegram-бота
+Flask==2.3.2             # Для веб-админки
+flask-login==0.6.3       # Для авторизации в админке
+yookassa==2.3.1          # Для интеграции с ЮKassa
+requests==2.31.0         # Для HTTP-запросов (например, к Marzban API)
+python-dotenv==1.0.0     # Для работы с .env файлом
