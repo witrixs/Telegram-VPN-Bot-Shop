@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru" x-data="{ darkMode: localStorage.getItem('darkMode') === 'true', showLogoutModal: false }" x-init="$watch('darkMode', val => localStorage.setItem('darkMode', val))" :class="{ 'dark': darkMode }">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Admin // Редактировать тарифы</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@2.8.2/dist/alpine.min.js" defer></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="min-h-screen text-gray-900 dark:text-gray-100">
+    <!-- Header -->
+    <header class="header fixed top-0 left-0 w-full p-4 md:p-6 z-40">
+        <div class="flex justify-between items-center max-w-6xl mx-auto">
+            <h1 class="text-2xl font-bold">Редактировать тарифы</h1>
+            <nav class="flex items-center space-x-6">
+                <a href="/dashboard" class="menu-item px-4 py-2 rounded-lg text-gray-700 dark:text-gray-300 hover:text-white">Панель управления</a>
+                <a href="/users" class="menu-item px-4 py-2 rounded-lg text-gray-700 dark:text-gray-300 hover:text-white">Пользователи</a>
+                <a href="/edit_tariffs" class="menu-item px-4 py-2 rounded-lg text-gray-700 dark:text-gray-300 hover:text-white">Тарифы</a>
+                <button @click="showLogoutModal = true" class="menu-item px-4 py-2 rounded-lg text-gray-700 dark:text-gray-300 hover:text-white">Выйти</button>
+                <label class="switch"><input type="checkbox" x-model="darkMode"><span class="slider"></span></label>
+            </nav>
+        </div>
+    </header>
+
+    <main class="p-4 md:p-6 fade-in max-w-6xl mx-auto md:mt-20 mt-16">
+        <!-- Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="mb-6">
+                    {% for category, message in messages %}
+                        <div class="bg-{{ 'green' if category == 'success' else 'red' }}-100 dark:bg-gray-600 border border-{{ 'green' if category == 'success' else 'red' }}-400 text-{{ 'green' if category == 'success' else 'red' }}-700 dark:text-gray-100 px-4 py-3 rounded animate-fade-in">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Edit Tariffs Form -->
+        <div class="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+            <h2 class="text-lg font-semibold mb-4">Редактировать цены тарифов</h2>
+            <form method="POST" class="flex flex-col gap-4">
+                <div>
+                    <label for="monthly_price" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Цена за месяц (в рублях):</label>
+                    <input type="number" name="monthly_price" value="{{ monthly_price }}" step="0.01" required class="mt-1 p-3 border rounded bg-gray-100 dark:bg-1e293b dark:border-4b5563 text-gray-900 dark:text-d1d5db focus:outline-none focus:ring-2 focus:ring-blue-500 w-full">
+                </div>
+                <div>
+                    <label for="yearly_price" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Цена за год (в рублях):</label>
+                    <input type="number" name="yearly_price" value="{{ yearly_price }}" step="0.01" required class="mt-1 p-3 border rounded bg-gray-100 dark:bg-1e293b dark:border-4b5563 text-gray-900 dark:text-d1d5db focus:outline-none focus:ring-2 focus:ring-blue-500 w-full">
+                </div>
+                <button type="submit" class="button-transition p-3 bg-blue-500 dark:bg-gray-600 text-white rounded hover:bg-blue-600 dark:hover:bg-gray-500">Сохранить изменения</button>
+            </form>
+        </div>
+    </main>
+
+    <!-- Logout Modal -->
+    <div x-show="showLogoutModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50" @click.away="showLogoutModal = false">
+        <div class="modal bg-white dark:bg-gray-700 rounded-lg shadow-xl p-6 w-full max-w-sm mx-4">
+            <h3 class="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Вы точно хотите выйти?</h3>
+            <div class="flex justify-end space-x-3">
+                <button @click="showLogoutModal = false" class="button-transition p-2 bg-gray-300 dark:bg-gray-600 text-gray-900 dark:text-gray-100 rounded hover:bg-gray-400 dark:hover:bg-gray-500">Отмена</button>
+                <a href="/logout" class="button-transition p-2 bg-red-500 dark:bg-gray-600 text-white rounded hover:bg-red-600 dark:hover:bg-gray-500">Выйти</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
