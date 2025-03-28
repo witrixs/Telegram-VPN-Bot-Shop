@@ -1,9 +1,9 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
-from database.db import get_users, update_user_subscription, get_admin, log_transaction, get_transactions, get_stats, check_expired_subscriptions, reset_subscription, get_marzban_username, get_tariff_price, update_tariff_price
+from database.db import get_users, update_user_subscription, get_admin, log_transaction, get_transactions, get_stats, check_expired_subscriptions, reset_subscription, get_marzban_username, get_tariff_price, update_tariff_price, remove_pending_payment
 from dotenv import load_dotenv
 import os
 import hashlib
-from bot.bot import bot  # Импортируем bot из bot/bot.py
+from bot.bot import bot
 from bot.marzban import create_marzban_subscription, update_marzban_subscription, delete_marzban_user
 from yookassa import Configuration, Payment
 import asyncio
@@ -20,18 +20,19 @@ app.secret_key = os.urandom(24)
 Configuration.account_id = os.getenv('SHOP_ID')
 Configuration.secret_key = os.getenv('SECRET_KEY')
 
-# Создаём цикл событий один раз для всего приложения
 loop = asyncio.get_event_loop()
 
-# Функция для выполнения асинхронных задач в существующем цикле событий
 def run_async(coro):
     asyncio.ensure_future(coro, loop=loop)
 
-async def send_telegram_message(telegram_id, message):
+async def send_telegram_message(telegram_id, message, reply_markup=None):
     try:
-        await bot.send_message(telegram_id, message)
+        sent_message = await bot.send_message(telegram_id, message, reply_markup=reply_markup)
+        return sent_message.message_id
     except Exception as e:
         print(f"Ошибка отправки сообщения в Telegram: {e}")
+        log_transaction(telegram_id, "error", f"Ошибка отправки сообщения: {str(e)}")
+        return None
 
 def auto_renew_subscriptions():
     while True:
@@ -55,7 +56,7 @@ def auto_renew_subscriptions():
                     subscription_url = update_marzban_subscription(username, days)
                     end_date = update_user_subscription(telegram_id, subscription_type, days, payment_method_id)
                     log_transaction(telegram_id, "success", f"Автоплатеж: подписка {subscription_type} продлена до {end_date}")
-                    run_async(send_telegram_message(telegram_id, f"Ваша подписка автоматически продлена!\nСсылка на подписку: {subscription_url}"))
+                    run_async(send_telegram_message(telegram_id, f"Ваша подписка автоматически продлена!"))
                     break
                 else:
                     attempts += 1
@@ -84,6 +85,7 @@ def auto_renew_subscriptions():
                 conn.commit()
                 conn.close()
                 log_transaction(telegram_id, "success", "Пользователь удален из системы и Marzban через 3 дня после окончания подписки")
+                run_async(send_telegram_message(telegram_id, "Ваша подписка удалена из-за неудачных попыток автоплатежа."))
             except Exception as e:
                 log_transaction(telegram_id, "error", f"Ошибка удаления пользователя: {str(e)}")
 
@@ -273,22 +275,18 @@ async def webhook():
         days = 30 if amount == get_tariff_price('month') else 365
         subscription_type = "month" if amount == get_tariff_price('month') else "year"
         payment_method_id = data['object']['payment_method']['id']
+        payment_id = data['object']['id']
 
         log_transaction(user_id, "processing", f"Обработка платежа на {amount} руб.")
         try:
             username = get_marzban_username(user_id)
             subscription_url = create_marzban_subscription(username, days)
             end_date = update_user_subscription(user_id, subscription_type, days, payment_method_id)
+            remove_pending_payment(user_id, payment_id)
             log_transaction(user_id, "success", f"Подписка {subscription_type} активирована до {end_date} с автоплатежом")
-            await bot.send_message(
-                user_id,
-                f"Подписка успешно активирована с автоплатежом!\n"
-                f"Ваша ссылка на подписку: {subscription_url}\n"
-                "Перейдите по ссылке для инструкций и ключей."
-            )
+            # Уведомление убрано, пользователь проверит вручную
         except Exception as e:
-            log_transaction(user_id, "error", str(e))
-            await bot.send_message(user_id, "Ошибка при активации подписки, обратитесь в поддержку.")
+            log_transaction(user_id, "error", f"Ошибка активации подписки: {str(e)}")
     return '', 200
 
 @app.errorhandler(404)
@@ -296,7 +294,6 @@ def page_not_found(e):
     return render_template('404.html'), 404
 
 if __name__ == '__main__':
-    # Запускаем цикл событий в отдельном потоке
     threading.Thread(target=lambda: loop.run_forever(), daemon=True).start()
     threading.Thread(target=auto_renew_subscriptions, daemon=True).start()
     app.run(host='0.0.0.0', port=5000)

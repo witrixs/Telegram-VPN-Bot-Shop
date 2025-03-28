@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 load_dotenv()
 
-MARZBAN_API_URL = os.getenv("VITE_BASE_API",)
+MARZBAN_API_URL = os.getenv("VITE_BASE_API")
 MARZBAN_USERNAME = os.getenv("MARZBAN_USERNAME")
 MARZBAN_PASSWORD = os.getenv("MARZBAN_PASSWORD")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1440))

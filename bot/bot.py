@@ -1,7 +1,7 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from database.db import add_user, update_user_subscription, get_tariff_price, get_marzban_username
+from database.db import add_user, update_user_subscription, get_tariff_price, get_marzban_username, add_pending_payment, get_pending_payment, remove_pending_payment
 from dotenv import load_dotenv
 import os
 from yookassa import Configuration, Payment
@@ -67,7 +67,7 @@ def profile_menu(telegram_id):
         username = get_marzban_username(telegram_id)
         subscription_url = get_marzban_subscription_url(username)
         menu.add(
-            InlineKeyboardButton("Открыть подписку", web_app=WebAppInfo(url=subscription_url)),
+            InlineKeyboardButton("Открыть подписку", url=subscription_url),
             InlineKeyboardButton("Назад", callback_data="back_to_main")
         )
     else:
@@ -77,11 +77,20 @@ def profile_menu(telegram_id):
         )
     return menu
 
+# Меню оплаты с кнопками "Оплатить" и "Проверить платеж"
+def get_payment_menu(confirmation_url, payment_id):
+    payment_menu = InlineKeyboardMarkup(row_width=1)
+    payment_menu.add(
+        InlineKeyboardButton("Оплатить", url=confirmation_url),
+        InlineKeyboardButton("Проверить платеж", callback_data=f"check_payment_{payment_id}"),
+        InlineKeyboardButton("Назад", callback_data="back_to_main")
+    )
+    return payment_menu
+
 async def update_message(chat_id, text, reply_markup=None):
     last_message_id = last_message_ids[chat_id]
     try:
         if last_message_id:
-            # Пробуем отредактировать существующее сообщение
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=last_message_id,
@@ -89,11 +98,9 @@ async def update_message(chat_id, text, reply_markup=None):
                 reply_markup=reply_markup
             )
         else:
-            # Если сообщения нет, отправляем новое и сохраняем его ID
             sent_message = await bot.send_message(chat_id, text, reply_markup=reply_markup)
             last_message_ids[chat_id] = sent_message.message_id
     except Exception:
-        # Если редактирование не удалось (например, сообщение удалено), отправляем новое
         sent_message = await bot.send_message(chat_id, text, reply_markup=reply_markup)
         last_message_ids[chat_id] = sent_message.message_id
 
@@ -121,15 +128,23 @@ async def process_payment(callback_query: types.CallbackQuery):
     user_id = str(callback_query.from_user.id)
     chat_id = callback_query.message.chat.id
     
-    # Получаем актуальные цены из базы данных как целые числа
     month_price = int(get_tariff_price('month') or 300)
     year_price = int(get_tariff_price('year') or 3650)
     
-    # Определяем сумму и длительность на основе выбора пользователя
     amount = month_price if callback_query.data == "buy_month" else year_price
     days = 30 if callback_query.data == "buy_month" else 365
     subscription_type = "month" if callback_query.data == "buy_month" else "year"
 
+    # Проверяем, есть ли незавершённый платёж
+    pending_payment = get_pending_payment(user_id)
+    if pending_payment:
+        payment_id, existing_type, existing_amount, confirmation_url = pending_payment
+        payment_text = f"Оплатите подписку ({existing_type}):"
+        await update_message(chat_id, payment_text, reply_markup=get_payment_menu(confirmation_url, payment_id))
+        await bot.answer_callback_query(callback_query.id)
+        return
+
+    # Создаём новый платёж
     payment = Payment.create({
         "amount": {"value": str(amount), "currency": "RUB"},
         "confirmation": {"type": "redirect", "return_url": "https://t.me/your-telegram-bot"},
@@ -139,9 +154,47 @@ async def process_payment(callback_query: types.CallbackQuery):
         "save_payment_method": True
     })
 
+    add_pending_payment(user_id, payment.id, subscription_type, amount, payment.confirmation.confirmation_url)
+    payment_text = f"Оплатите подписку ({subscription_type}):"
+    await update_message(chat_id, payment_text, reply_markup=get_payment_menu(payment.confirmation.confirmation_url, payment.id))
     await bot.answer_callback_query(callback_query.id)
-    payment_text = f"Оплатите подписку ({subscription_type}) по ссылке:\n{payment.confirmation.confirmation_url}"
-    await update_message(chat_id, payment_text, reply_markup=get_main_menu(user_id))
+
+@dp.callback_query_handler(lambda c: c.data.startswith("check_payment_"))
+async def check_payment(callback_query: types.CallbackQuery):
+    user_id = str(callback_query.from_user.id)
+    chat_id = callback_query.message.chat.id
+    payment_id = callback_query.data.split("_")[2]
+
+    pending_payment = get_pending_payment(user_id)
+    if not pending_payment or pending_payment[0] != payment_id:
+        await bot.answer_callback_query(callback_query.id, text="Этот платёж не найден или уже обработан.")
+        await update_message(chat_id, "Главное меню:", reply_markup=get_main_menu(user_id))
+        return
+
+    payment = Payment.find_one(payment_id)
+    if payment.status == "succeeded":
+        month_price = int(get_tariff_price('month') or 300)
+        year_price = int(get_tariff_price('year') or 3650)
+        amount = float(payment.amount.value)
+        days = 30 if amount == month_price else 365
+        subscription_type = "month" if amount == month_price else "year"
+        
+        username = get_marzban_username(user_id)
+        subscription_url = create_marzban_subscription(username, days)
+        end_date = update_user_subscription(user_id, subscription_type, days, payment.payment_method.id)
+        remove_pending_payment(user_id, payment_id)
+        
+        profile_text = (
+            f"Ваш личный кабинет:\n"
+            f"Тариф: {subscription_type}\n"
+            f"Дата окончания: {end_date}"
+        )
+        await bot.answer_callback_query(callback_query.id, text="Платёж подтверждён!")
+        await update_message(chat_id, profile_text, reply_markup=profile_menu(user_id))
+    else:
+        await bot.answer_callback_query(callback_query.id, text="Платёж ещё не подтверждён. Попробуйте позже.")
+        payment_text = f"Оплатите подписку ({pending_payment[1]}):"
+        await update_message(chat_id, payment_text, reply_markup=get_payment_menu(pending_payment[3], payment_id))
 
 @dp.callback_query_handler(lambda c: c.data == "profile")
 async def process_profile(callback_query: types.CallbackQuery):

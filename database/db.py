@@ -18,6 +18,10 @@ def init_db():
     
     c.execute('''CREATE TABLE IF NOT EXISTS tariffs 
                  (type TEXT PRIMARY KEY, price REAL NOT NULL)''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS pending_payments 
+                 (id INTEGER PRIMARY KEY, telegram_id TEXT, payment_id TEXT, subscription_type TEXT, 
+                  amount REAL, confirmation_url TEXT, created_at TEXT, UNIQUE(telegram_id, payment_id))''')
 
     default_admin_username = "admin"
     default_admin_password = "admin"
@@ -184,5 +188,30 @@ def update_tariff_price(tariff_type, price):
     conn = sqlite3.connect('users.db')
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO tariffs (type, price) VALUES (?, ?)", (tariff_type, price))
+    conn.commit()
+    conn.close()
+
+def add_pending_payment(telegram_id, payment_id, subscription_type, amount, confirmation_url):
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    c.execute("INSERT OR IGNORE INTO pending_payments (telegram_id, payment_id, subscription_type, amount, confirmation_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+              (telegram_id, payment_id, subscription_type, amount, confirmation_url, created_at))
+    conn.commit()
+    conn.close()
+
+def get_pending_payment(telegram_id):
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute("SELECT payment_id, subscription_type, amount, confirmation_url FROM pending_payments WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 1",
+              (telegram_id,))
+    payment = c.fetchone()
+    conn.close()
+    return payment  # (payment_id, subscription_type, amount, confirmation_url) или None
+
+def remove_pending_payment(telegram_id, payment_id):
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM pending_payments WHERE telegram_id = ? AND payment_id = ?", (telegram_id, payment_id))
     conn.commit()
     conn.close()
